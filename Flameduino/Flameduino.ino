@@ -9,25 +9,36 @@ Flameduino Controls an ignition coil with a set dwell (compile time)
 and variable spark frequency, specifically for purposes of flamethrowing.
 */
 
-//Pin Definitions
+// -------------------------
+//     Pin Definitions
+// -------------------------
 #define ACTIVATION_PIN 2
 #define IGNITION_PIN 3
 #define EXTERNAL_LED_PIN 4
 #define INTERNAL_LED_PIN 13
 #define FREQUENCY_PIN A0
 
-//Settings
-int dwell = 2500;            //Ignition coil dwell in microseconds (2.5ms = 2500us)
-long periodMax = 1000;       //Maximum period between ignitions, in milliseconds (min frequency)
-long periodMin = 5;          //Minimum period between ignitions, in milliseconds (max frequency)
-int periodCorrection = 0;    //Variance to period due to loop code execution time (milliseconds)
-float linearity = 2.5;       //1.0 = linear, 0.5 = more resolution in the high end, 2.0 = more resolution in the low end (exponential)
-bool debug = false;          //true = write to serial monitor, false = bypass
-bool triggerHigh = true;     //true = HIGH to fire, false = LOW to fire
 
-//Variables
+// -------------------------
+//        Settings
+// -------------------------
+const int dwell = 2500;         //Ignition coil dwell in microseconds (2.5ms = 2500us)
+const long periodMax = 1000;    //Maximum period between ignitions, in milliseconds (min frequency)
+const long periodMin = 5;       //Minimum period between ignitions, in milliseconds (max frequency)
+const int periodCorrection = 0; //Variance to period due to loop code execution time (milliseconds)
+const float linearity = 2.5;    //1.0 = linear, 0.5 = more resolution in the high end, 2.0 = more resolution in the low end (exponential)
+const bool debug = false;       //true = write to serial monitor, false = bypass
+const bool triggerHigh = true;  //true = HIGH to fire, false = LOW to fire
+
+
+// -------------------------
+//     Global Variables
+// -------------------------
 long period = 0;
 
+// -------------------------
+//      Initialization
+// -------------------------
 void setup() 
 {
   pinMode(ACTIVATION_PIN, INPUT);
@@ -48,6 +59,9 @@ void setup()
   }
 }
 
+// -------------------------
+//         Main Loop
+// -------------------------
 void loop() 
 {
   period = getPeriod();
@@ -68,6 +82,9 @@ void loop()
   delayFixed(period);
 }
 
+// -------------------------
+//          Methods
+// -------------------------
 bool isActive() 
 {
   return digitalRead(ACTIVATION_PIN) == LOW;
@@ -123,7 +140,6 @@ void fire()
 // -------------------------
 // Generic Utility Functions
 // -------------------------
-
 void delayFixed(long ms)
 {
   if (ms < 16)
