@@ -30,7 +30,7 @@ const float linearity = 2.5;    //1.0 = linear, 0.5 = more resolution in the hig
 const bool debug = false;       //true = write to serial monitor, false = bypass
 const bool triggerHigh = true;  //true = HIGH to fire, false = LOW to fire
 const bool multiFire = true;    //true = fire [firingCount] times per period, false = fire once per period
-const int firingCount = 1;      //Numeber of sparks to fire per event
+const int firingCount = 3;      //Numeber of sparks to fire per event
 const int firingDwell = 2000;   //Ignition coil firing time in microseconds (2ms = 2000us)
 
 // -------------------------
