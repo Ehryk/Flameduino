@@ -22,14 +22,16 @@ and variable spark frequency, specifically for purposes of flamethrowing.
 // -------------------------
 //        Settings
 // -------------------------
-const int dwell = 2500;         //Ignition coil dwell in microseconds (2.5ms = 2500us)
+const int dwell = 2500;         //Ignition coil charging dwell in microseconds (2.5ms = 2500us)
 const long periodMax = 1000;    //Maximum period between ignitions, in milliseconds (min frequency)
 const long periodMin = 5;       //Minimum period between ignitions, in milliseconds (max frequency)
 const int periodCorrection = 0; //Variance to period due to loop code execution time (milliseconds)
 const float linearity = 2.5;    //1.0 = linear, 0.5 = more resolution in the high end, 2.0 = more resolution in the low end (exponential)
 const bool debug = false;       //true = write to serial monitor, false = bypass
 const bool triggerHigh = true;  //true = HIGH to fire, false = LOW to fire
-
+const bool multiFire = true;    //true = fire [firingCount] times per period, false = fire once per period
+const int firingCount = 1;      //Numeber of sparks to fire per event
+const int firingDwell = 2000;   //Ignition coil firing time in microseconds (2ms = 2000us)
 
 // -------------------------
 //     Global Variables
@@ -67,7 +69,10 @@ void loop()
   period = getPeriod();
   
   if (isActive()) {
-    fire();
+    if (multiFire)
+      fireMultiple(); //Multiple Firing Events (firingCount)
+    else
+      fire();         //Single Firing Event
   }
   
   if (debug)
@@ -127,7 +132,17 @@ void deactivate()
     digitalWrite(IGNITION_PIN, HIGH);
     
   digitalWrite(EXTERNAL_LED_PIN, LOW);
-  digitalWrite(INTERNAL_LED_PIN, LOW)
+  digitalWrite(INTERNAL_LED_PIN, LOW);
+}
+
+void fireMultiple()
+{
+  fire();
+  for(int i = 1; i <= firingCount; i++)
+  {
+    delayMicroseconds(firingDwell);
+    fire();
+  }
 }
 
 void fire()
@@ -142,7 +157,9 @@ void fire()
 // -------------------------
 void delayFixed(long ms)
 {
-  if (ms < 16)
+  if (ms <= 0)
+    return;
+  else if (ms < 16)
     delayMicroseconds(ms * 1000);
   else
     delay(ms);
