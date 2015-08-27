@@ -1,9 +1,9 @@
-/*
+/* 
 ==============
 = Flameduino =
 ==============
-v1.0
-Eric Menze
+     v1.1
+  Eric Menze
 
 Flameduino Controls an ignition coil with a set dwell (compile time)
 and variable spark frequency, specifically for purposes of flamethrowing.
@@ -17,7 +17,6 @@ and variable spark frequency, specifically for purposes of flamethrowing.
 #define EXTERNAL_LED_PIN 4
 #define INTERNAL_LED_PIN 13
 #define FREQUENCY_PIN A0
-
 
 // -------------------------
 //        Settings
