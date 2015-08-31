@@ -2,39 +2,60 @@
 ==============
 = Flameduino =
 ==============
-     v1.1
+     v1.2
   Eric Menze
 
 Flameduino Controls an ignition coil with a set dwell (compile time)
 and variable spark frequency, specifically for purposes of flamethrowing.
 */
+#include <TimerOne.h>
 
 // -------------------------
 //     Pin Definitions
 // -------------------------
 #define ACTIVATION_PIN 2
-#define IGNITION_PIN 3
+#define TACH_PIN 3
+#define IGNITION_PIN 4
 #define EXTERNAL_LED_PIN 4
 #define INTERNAL_LED_PIN 13
 #define FREQUENCY_PIN A0
 
 // -------------------------
+//      Ignition Modes
+// -------------------------
+#define OFF 0
+#define DWELL 1
+#define MF_WAIT 2
+#define MF_DWELL 3
+#define WAIT 4
+
+// -------------------------
 //        Settings
 // -------------------------
+const bool debug = false;       //true = write to serial monitor, false = bypass
+//Ignition Settings
 const int dwell = 2500;         //Ignition coil charging dwell in microseconds (2.5ms = 2500us)
-const long periodMax = 1000;    //Maximum period between ignitions, in milliseconds (min frequency)
-const long periodMin = 5;       //Minimum period between ignitions, in milliseconds (max frequency)
+const long periodMax = 1000000; //Maximum period between ignitions, in microseconds (min frequency)
+const long periodMin = 5000;    //Minimum period between ignitions, in microseconds (max frequency)
 const int periodCorrection = 0; //Variance to period due to loop code execution time (milliseconds)
 const float linearity = 2.5;    //1.0 = linear, 0.5 = more resolution in the high end, 2.0 = more resolution in the low end (exponential)
-const bool debug = false;       //true = write to serial monitor, false = bypass
 const bool triggerHigh = true;  //true = HIGH to fire, false = LOW to fire
+//Multifire Settings
 const bool multiFire = true;    //true = fire [firingCount] times per period, false = fire once per period
-const int firingCount = 3;      //Numeber of sparks to fire per event
-const int firingDwell = 2000;   //Ignition coil firing time in microseconds (2ms = 2000us)
+const int multiCount = 3;       //Numeber of sparks to fire per event
+const int multiDelay = 2000;    //Delay between multifires in microseconds (2ms = 2000us)
 
 // -------------------------
 //     Global Variables
 // -------------------------
+volatile bool active = false;
+unsigned int rpm = 0;
+volatile int tachDuration0 = 0;
+volatile int tachDuration1 = 0;
+volatile int tachDuration2 = 0;
+volatile unsigned long tachLast = 0;
+volatile unsigned int ignitionMode = OFF;
+volatile int remainingCount = 0;
 long period = 0;
 
 // -------------------------
@@ -43,6 +64,7 @@ long period = 0;
 void setup() 
 {
   pinMode(ACTIVATION_PIN, INPUT);
+  pinMode(TACH_PIN, INPUT);
   pinMode(IGNITION_PIN, OUTPUT);
   pinMode(FREQUENCY_PIN, INPUT);
   pinMode(INTERNAL_LED_PIN, OUTPUT);
@@ -50,13 +72,21 @@ void setup()
   
   //Use built in pull-up resistor
   digitalWrite(ACTIVATION_PIN, HIGH);
-  deactivate();
+  active = digitalRead(ACTIVATION_PIN) == LOW;
+  dischargeCoil();
+
+  attachInterrupt(TACH_PIN - 2, ISR_TACH, RISING);
+  attachInterrupt(ACTIVATION_PIN - 2, ISR_ACTIVE, CHANGE);
+  
+  Timer1.initialize(1000000);
+  Timer1.stop();
+  Timer1.attachInterrupt(ISR_IGNITION);
   
   if (debug)
   {
     Serial.begin(9600); 
     Serial.println("Flameduino");
-    Serial.println("v1.0 Eric Menze");
+    Serial.println("v1.2 Eric Menze");
   }
 }
 
@@ -66,13 +96,12 @@ void setup()
 void loop() 
 {
   period = getPeriod();
-  
-  if (isActive()) {
-    if (multiFire)
-      fireMultiple(); //Multiple Firing Events (firingCount)
-    else
-      fire();         //Single Firing Event
-  }
+  rpm = getRPM();
+
+  if (active && ignitionMode == OFF)
+    enableCoil();
+  else if (!active)
+    disableCoil();
   
   if (debug)
   {
@@ -80,10 +109,10 @@ void loop()
     Serial.print(period);
     Serial.print("ms, dwell: ");
     Serial.print(dwell / 1000.0);
-    Serial.println("ms");
+    Serial.print("ms, RPM: ");
+    Serial.print(rpm);
+    Serial.println();
   }
-
-  delayFixed(period);
 }
 
 // -------------------------
@@ -91,7 +120,8 @@ void loop()
 // -------------------------
 bool isActive() 
 {
-  return digitalRead(ACTIVATION_PIN) == LOW;
+  //return digitalRead(ACTIVATION_PIN) == LOW;
+  return active;
 }
 
 long getPeriod()
@@ -112,7 +142,37 @@ long getPeriod()
   return periodMin + (periodMax - periodMin) * pow(percentage, linearity) + periodCorrection;
 }
 
-void activate()
+unsigned int getRPM()
+{
+  if (debug)
+  {
+    Serial.print("t0: ");
+    Serial.print(tachDuration0);
+    Serial.print(", t1: ");
+    Serial.print(tachDuration1);
+    Serial.print(", t2: ");
+    Serial.print(tachDuration2);
+    Serial.println();
+  }
+  
+  //Calculate Weighted Average
+  return (3*tachDuration0 + 2*tachDuration1 + 1*tachDuration2)/6;
+}
+
+void enableCoil()
+{
+  //Enable Coil Firing
+  ignitionMode = WAIT;
+  ISR_IGNITION();
+}
+
+void disableCoil()
+{
+  ignitionMode = OFF;
+  Timer1.stop();
+}
+
+void chargeCoil()
 {
   digitalWrite(EXTERNAL_LED_PIN, HIGH);
   digitalWrite(INTERNAL_LED_PIN, HIGH);
@@ -123,7 +183,7 @@ void activate()
     digitalWrite(IGNITION_PIN, LOW);
 }
 
-void deactivate()
+void dischargeCoil()
 {
   if (triggerHigh)
     digitalWrite(IGNITION_PIN, LOW);
@@ -136,19 +196,127 @@ void deactivate()
 
 void fireMultiple()
 {
-  fire();
-  for(int i = 1; i <= firingCount; i++)
+  fireCoil();
+  for(int i = 1; i <= multiCount; i++)
   {
-    delayMicroseconds(firingDwell);
-    fire();
+    delayMicroseconds(multiDelay);
+    fireCoil();
   }
 }
 
-void fire()
+void fireCoil()
 {
-  activate();
+  chargeCoil();
   delayMicroseconds(dwell);
-  deactivate();
+  dischargeCoil();
+}
+
+// -------------------------
+//    Interrupt Handlers
+// -------------------------
+void ISR_TACH()
+{
+  int duration = (int)(micros() - tachLast);
+  if (duration < 0)
+  {
+    //Handle Rollover
+    duration = 0xFFFFFFFFu - tachLast + micros();
+  }
+  //Shift the values
+  tachDuration2 = tachDuration1;
+  tachDuration1 = tachDuration0;
+  tachDuration0 = duration;
+  
+  tachLast = micros();
+  
+  //Calculate RPM
+  //rpm = getRPM();
+}
+
+void ISR_ACTIVE()
+{
+  //Set the active global variable
+  active = digitalRead(ACTIVATION_PIN) == LOW;
+}
+
+void ISR_IGNITION()
+{
+  //Control the ignition (Tail of Mode)
+  switch(ignitionMode)
+  {
+    case OFF:
+      //Do nothing
+      return;
+    case DWELL:
+      //Fire
+      dischargeCoil();
+      if (multiFire) remainingCount = multiCount - 1;
+      break;
+    case MF_WAIT:
+      //Charge Coil
+      chargeCoil();
+      break;
+    case MF_DWELL:
+      //MultiFire
+      dischargeCoil();
+      remainingCount--;
+      break;
+    case WAIT:
+      //Charge coil
+      chargeCoil();
+      break;
+  }
+  
+  //Advance the Mode
+  ignitionMode = nextMode(ignitionMode);
+  
+  //Set the delay period (Head of Mode)
+  switch(ignitionMode)
+  {
+    case OFF:
+      Timer1.stop();
+      return;
+    case DWELL:
+      //Charging Coil
+      Timer1.setPeriod(dwell);
+      Timer1.restart();
+      break;
+    case MF_WAIT:
+      //Waiting (MultiFire)
+      Timer1.setPeriod(multiDelay);
+      Timer1.restart();
+      break;
+    case MF_DWELL:
+      //Charging Coil
+      Timer1.setPeriod(dwell);
+      Timer1.restart();
+      break;
+    case WAIT:
+      //Waiting (Frequency)
+      Timer1.setPeriod(period);
+      Timer1.restart();
+      break;
+  }
+}
+
+int nextMode(int mode)
+{
+  switch(mode) {
+    case OFF:
+      return OFF;
+    case DWELL:
+      if(multiFire && remainingCount > 0)
+        return MF_WAIT;
+      else
+        return WAIT;
+    case MF_WAIT:
+      if (remainingCount > 0)
+        return MF_WAIT;
+      else
+        return WAIT;
+    case WAIT:
+      return DWELL;
+  }
 }
 
 // -------------------------

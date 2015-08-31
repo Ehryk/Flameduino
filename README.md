@@ -14,6 +14,7 @@ The current feature set includes:
 
 Release History
 ---
+ - v1.2 (in development)
  - v1.1 2015.08.27 Added multiFire feature
  - v1.0 2015.08.26 Initial Release
 
