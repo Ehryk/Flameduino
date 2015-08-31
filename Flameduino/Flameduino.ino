@@ -32,7 +32,7 @@ and variable spark frequency, specifically for purposes of flamethrowing.
 // -------------------------
 //        Settings
 // -------------------------
-const bool debug = false;       //true = write to serial monitor, false = bypass
+const bool debug = true;       //true = write to serial monitor, false = bypass
 //Ignition Settings
 const int dwell = 2500;         //Ignition coil charging dwell in microseconds (2.5ms = 2500us)
 const long periodMax = 1000000; //Maximum period between ignitions, in microseconds (min frequency)
@@ -50,12 +50,13 @@ const int multiDelay = 2000;    //Delay between multifires in microseconds (2ms 
 // -------------------------
 volatile bool active = false;
 unsigned int rpm = 0;
-volatile int tachDuration0 = 0;
-volatile int tachDuration1 = 0;
-volatile int tachDuration2 = 0;
+volatile unsigned long tachDuration0 = 0;
+volatile unsigned long tachDuration1 = 0;
+volatile unsigned long tachDuration2 = 0;
 volatile unsigned long tachLast = 0;
 volatile unsigned int ignitionMode = OFF;
 volatile int remainingCount = 0;
+volatile bool updateTimer = false;
 long period = 0;
 
 // -------------------------
@@ -78,9 +79,9 @@ void setup()
   attachInterrupt(TACH_PIN - 2, ISR_TACH, RISING);
   attachInterrupt(ACTIVATION_PIN - 2, ISR_ACTIVE, CHANGE);
   
-  Timer1.initialize(1000000);
-  Timer1.stop();
+  Timer1.initialize();
   Timer1.attachInterrupt(ISR_IGNITION);
+  Timer1.start();
   
   if (debug)
   {
@@ -102,11 +103,44 @@ void loop()
     enableCoil();
   else if (!active)
     disableCoil();
+    
+  if (updateTimer) 
+  {
+    //Set the delay period (Head of Mode)
+    Timer1.detachInterrupt();
+    switch(ignitionMode)
+    {
+      case OFF:
+        Timer1.stop();
+        break;
+      case DWELL:
+        //Charging Coil
+        Timer1.attachInterrupt(ISR_IGNITION, dwell);
+        Timer1.start();
+        break;
+      case MF_WAIT:
+        //Waiting (MultiFire)
+        Timer1.attachInterrupt(ISR_IGNITION, multiDelay);
+        Timer1.start();
+        break;
+      case MF_DWELL:
+        //Charging Coil
+        Timer1.attachInterrupt(ISR_IGNITION, dwell);
+        Timer1.start();
+        break;
+      case WAIT:
+        //Waiting (Frequency)
+        Timer1.attachInterrupt(ISR_IGNITION, period);
+        Timer1.start();
+        break;
+    }
+    updateTimer = false;
+  }
   
   if (debug)
   {
     Serial.print("Period: ");
-    Serial.print(period);
+    Serial.print(period / 1000.0);
     Serial.print("ms, dwell: ");
     Serial.print(dwell / 1000.0);
     Serial.print("ms, RPM: ");
@@ -152,24 +186,25 @@ unsigned int getRPM()
     Serial.print(tachDuration1);
     Serial.print(", t2: ");
     Serial.print(tachDuration2);
-    Serial.println();
+    Serial.print(", ");
   }
   
   //Calculate Weighted Average
-  return (3*tachDuration0 + 2*tachDuration1 + 1*tachDuration2)/6;
+  unsigned long average = (3*tachDuration0 + 2*tachDuration1 + 1*tachDuration2)/6;
+  return 60.0 * 1000000 / average;
 }
 
 void enableCoil()
 {
   //Enable Coil Firing
   ignitionMode = WAIT;
-  ISR_IGNITION();
 }
 
 void disableCoil()
 {
-  ignitionMode = OFF;
+  //Disable Coil Firing
   Timer1.stop();
+  ignitionMode = OFF;
 }
 
 void chargeCoil()
@@ -197,7 +232,7 @@ void dischargeCoil()
 void fireMultiple()
 {
   fireCoil();
-  for(int i = 1; i <= multiCount; i++)
+  for(int i = 1; i < multiCount; i++)
   {
     delayMicroseconds(multiDelay);
     fireCoil();
@@ -216,18 +251,25 @@ void fireCoil()
 // -------------------------
 void ISR_TACH()
 {
-  int duration = (int)(micros() - tachLast);
-  if (duration < 0)
+  unsigned long duration;
+  unsigned long current = micros();
+  
+  if (current >= tachLast)
+  {
+    duration = current - tachLast;
+  }
+  else
   {
     //Handle Rollover
-    duration = 0xFFFFFFFFu - tachLast + micros();
+    //duration = 0xFFFFFFFFu - tachLast + current;
   }
+  
   //Shift the values
   tachDuration2 = tachDuration1;
   tachDuration1 = tachDuration0;
   tachDuration0 = duration;
   
-  tachLast = micros();
+  tachLast = current;
   
   //Calculate RPM
   //rpm = getRPM();
@@ -269,34 +311,7 @@ void ISR_IGNITION()
   
   //Advance the Mode
   ignitionMode = nextMode(ignitionMode);
-  
-  //Set the delay period (Head of Mode)
-  switch(ignitionMode)
-  {
-    case OFF:
-      Timer1.stop();
-      return;
-    case DWELL:
-      //Charging Coil
-      Timer1.setPeriod(dwell);
-      Timer1.restart();
-      break;
-    case MF_WAIT:
-      //Waiting (MultiFire)
-      Timer1.setPeriod(multiDelay);
-      Timer1.restart();
-      break;
-    case MF_DWELL:
-      //Charging Coil
-      Timer1.setPeriod(dwell);
-      Timer1.restart();
-      break;
-    case WAIT:
-      //Waiting (Frequency)
-      Timer1.setPeriod(period);
-      Timer1.restart();
-      break;
-  }
+  updateTimer = true;
 }
 
 int nextMode(int mode)
