@@ -44,6 +44,8 @@ const bool triggerHigh = true;  //true = HIGH to fire, false = LOW to fire
 const bool multiFire = true;    //true = fire [firingCount] times per period, false = fire once per period
 const int multiCount = 3;       //Numeber of sparks to fire per event
 const int multiDelay = 2000;    //Delay between multifires in microseconds (2ms = 2000us)
+//Tachometer Settings
+const int tachTrim = -30;        //Ticks to trim off the tach durations
 
 // -------------------------
 //     Global Variables
@@ -252,24 +254,27 @@ void fireCoil()
 void ISR_TACH()
 {
   unsigned long duration;
+  unsigned long previous = tachLast;
   unsigned long current = micros();
+  tachLast = current;
   
-  if (current >= tachLast)
+  //Now that tachLast has been set, enable Interrupts
+  interrupts();
+  
+  if (current >= previous)
   {
-    duration = current - tachLast;
+    duration = current - previous + tachTrim;
   }
   else
   {
     //Handle Rollover
-    //duration = 0xFFFFFFFFu - tachLast + current;
+    duration = 0xFFFFFFFFu - previous + current + tachTrim;
   }
   
   //Shift the values
   tachDuration2 = tachDuration1;
   tachDuration1 = tachDuration0;
   tachDuration0 = duration;
-  
-  tachLast = current;
   
   //Calculate RPM
   //rpm = getRPM();
