@@ -25,14 +25,17 @@ and variable spark frequency, specifically for purposes of flamethrowing.
 // -------------------------
 #define OFF 0
 #define DWELL 1
-#define MF_WAIT 2
-#define MF_DWELL 3
-#define WAIT 4
+#define FIRE 2
+#define MF_WAIT 3
+#define MF_DWELL 4
+#define MULTIFIRE 5
+#define WAIT 6
 
 // -------------------------
 //        Settings
 // -------------------------
-const bool debug = true;       //true = write to serial monitor, false = bypass
+const bool debug = true;        //true = write to serial monitor, false = bypass
+const int serialOutLoops = 5;   //Number of loops that should execute before a serial write
 //Ignition Settings
 const int dwell = 2500;         //Ignition coil charging dwell in microseconds (2.5ms = 2500us)
 const long periodMax = 1000000; //Maximum period between ignitions, in microseconds (min frequency)
@@ -56,9 +59,10 @@ volatile unsigned long tachDuration0 = 0;
 volatile unsigned long tachDuration1 = 0;
 volatile unsigned long tachDuration2 = 0;
 volatile unsigned long tachLast = 0;
-volatile unsigned int ignitionMode = OFF;
-volatile int remainingCount = 0;
+volatile byte ignitionMode = OFF;
+volatile byte remainingCount = 0;
 volatile bool updateTimer = false;
+int loopsSinceSerialWrite = 0;
 long period = 0;
 
 // -------------------------
@@ -101,11 +105,26 @@ void loop()
   period = getPeriod();
   rpm = getRPM();
 
+  noInterrupts();
   if (active && ignitionMode == OFF)
     enableCoil();
   else if (!active)
     disableCoil();
-    
+
+  switch(ignitionMode)
+  {
+    case FIRE:
+      dischargeCoil();
+      if (multiFire) remainingCount = multiCount - 1;
+      ignitionMode = nextMode(ignitionMode);
+      break;
+    case MULTIFIRE:
+      dischargeCoil();
+      remainingCount--;
+      ignitionMode = nextMode(ignitionMode);
+      break;
+  }
+  
   if (updateTimer) 
   {
     //Set the delay period (Head of Mode)
@@ -117,6 +136,7 @@ void loop()
         break;
       case DWELL:
         //Charging Coil
+        chargeCoil();
         Timer1.attachInterrupt(ISR_IGNITION, dwell);
         Timer1.start();
         break;
@@ -127,6 +147,7 @@ void loop()
         break;
       case MF_DWELL:
         //Charging Coil
+        chargeCoil();
         Timer1.attachInterrupt(ISR_IGNITION, dwell);
         Timer1.start();
         break;
@@ -138,8 +159,9 @@ void loop()
     }
     updateTimer = false;
   }
+  interrupts();
   
-  if (debug)
+  if (debug && loopsSinceSerialWrite >= serialOutLoops)
   {
     Serial.print("Period: ");
     Serial.print(period / 1000.0);
@@ -148,7 +170,10 @@ void loop()
     Serial.print("ms, RPM: ");
     Serial.print(rpm);
     Serial.println();
+    loopsSinceSerialWrite = 0;
   }
+
+  loopsSinceSerialWrite++;
 }
 
 // -------------------------
@@ -166,7 +191,7 @@ long getPeriod()
   
   float percentage = frequency / 1023.0;
   
-  if (debug)
+  if (debug && loopsSinceSerialWrite >= serialOutLoops)
   {
     Serial.print("Frequency: ");
     Serial.print(frequency);
@@ -180,7 +205,8 @@ long getPeriod()
 
 unsigned int getRPM()
 {
-  if (debug)
+  noInterrupts();
+  if (debug  && loopsSinceSerialWrite >= serialOutLoops)
   {
     Serial.print("t0: ");
     Serial.print(tachDuration0);
@@ -193,20 +219,23 @@ unsigned int getRPM()
   
   //Calculate Weighted Average
   unsigned long average = (3*tachDuration0 + 2*tachDuration1 + 1*tachDuration2)/6;
+  interrupts();
+  
   return 60.0 * 1000000 / average;
 }
 
 void enableCoil()
 {
   //Enable Coil Firing
-  ignitionMode = WAIT;
+  ignitionMode = DWELL;
+  updateTimer = true;
 }
 
 void disableCoil()
 {
   //Disable Coil Firing
-  Timer1.stop();
   ignitionMode = OFF;
+  updateTimer = true;
 }
 
 void chargeCoil()
@@ -229,6 +258,32 @@ void dischargeCoil()
     
   digitalWrite(EXTERNAL_LED_PIN, LOW);
   digitalWrite(INTERNAL_LED_PIN, LOW);
+}
+
+byte nextMode(byte mode)
+{
+  switch(mode) {
+    case OFF:
+      return OFF;
+    case DWELL:
+      return FIRE;
+    case FIRE:
+      if(multiFire && remainingCount > 0)
+        return MF_WAIT;
+      else
+        return WAIT;
+    case MF_WAIT:
+      return MF_DWELL;
+    case MF_DWELL:
+      return MULTIFIRE;
+    case MULTIFIRE:
+      if (remainingCount > 0)
+        return MF_WAIT;
+      else
+        return WAIT;
+    case WAIT:
+      return DWELL;
+  }
 }
 
 void fireMultiple()
@@ -288,55 +343,9 @@ void ISR_ACTIVE()
 
 void ISR_IGNITION()
 {
-  //Control the ignition (Tail of Mode)
-  switch(ignitionMode)
-  {
-    case OFF:
-      //Do nothing
-      return;
-    case DWELL:
-      //Fire
-      dischargeCoil();
-      if (multiFire) remainingCount = multiCount - 1;
-      break;
-    case MF_WAIT:
-      //Charge Coil
-      chargeCoil();
-      break;
-    case MF_DWELL:
-      //MultiFire
-      dischargeCoil();
-      remainingCount--;
-      break;
-    case WAIT:
-      //Charge coil
-      chargeCoil();
-      break;
-  }
-  
   //Advance the Mode
   ignitionMode = nextMode(ignitionMode);
   updateTimer = true;
-}
-
-int nextMode(int mode)
-{
-  switch(mode) {
-    case OFF:
-      return OFF;
-    case DWELL:
-      if(multiFire && remainingCount > 0)
-        return MF_WAIT;
-      else
-        return WAIT;
-    case MF_WAIT:
-      if (remainingCount > 0)
-        return MF_WAIT;
-      else
-        return WAIT;
-    case WAIT:
-      return DWELL;
-  }
 }
 
 // -------------------------
