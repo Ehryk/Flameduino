@@ -35,17 +35,17 @@ and variable spark frequency, specifically for purposes of flamethrowing.
 // -------------------------
 //        Settings
 // -------------------------
-const bool debug = true;       //true = write to serial monitor, false = bypass
-const int serialOutLoops = 000; //Number of loops that should execute before a serial write
+const bool debug = false;       //true = write to serial monitor, false = bypass
+const int serialOutLoops = 300; //Number of loops that should execute before a serial write
 //Ignition Settings
 const int dwell = 2500;         //Ignition coil charging dwell in microseconds (2.5ms = 2500us)
-const long periodMax = 2000000; //Maximum period between ignitions, in microseconds (min frequency)
+const long periodMax = 1000000; //Maximum period between ignitions, in microseconds (min frequency)
 const long periodMin = 5000;    //Minimum period between ignitions, in microseconds (max frequency)
 const int periodCorrection = 0; //Variance to period due to loop code execution time (milliseconds)
-const float linearity = 2.5;    //1.0 = linear, 0.5 = more resolution in the high end, 2.0 = more resolution in the low end (exponential)
+const float linearity = 3.0;    //1.0 = linear, 0.5 = more resolution in the high end, 2.0 = more resolution in the low end (exponential)
 const bool triggerHigh = true;  //true = HIGH to fire, false = LOW to fire
 //Multifire Settings
-const bool multiFire = false;    //true = fire [firingCount] times per period, false = fire once per period
+const bool multiFire = true;    //true = fire [firingCount] times per period, false = fire once per period
 const int multiCount = 3;       //Numeber of sparks to fire per event
 const int multiDelay = 2000;    //Delay between multifires in microseconds (2ms = 2000us)
 //Tachometer Settings
@@ -58,7 +58,6 @@ const byte activeState = LOW;    //State of activation pin that determines activ
 // -------------------------
 volatile bool active = false;
 byte ignitionMode = OFF;
-volatile bool updateTimer = true;
 volatile unsigned long tachPrevious = 0;
 volatile unsigned long tachCurrent = 0;
 unsigned long tachDuration0 = 0;
@@ -92,8 +91,6 @@ void setup()
   attachInterrupt(TACH_PIN - 2, ISR_TACH, RISING);
   attachInterrupt(ACTIVATION_PIN - 2, ISR_ACTIVE, CHANGE);
   
-  initializeTimer1();
-  
   if (debug)
   {
     Serial.begin(9600); 
@@ -122,62 +119,7 @@ void loop()
   else if (!active && ignitionMode != OFF)
     disableCoil();
 
-  //Fire Ignition
-  switch(ignitionMode)
-  {
-    case FIRE:
-      dischargeCoil();
-      if (multiFire) remainingCount = multiCount - 1;
-      updateTimer = true;
-      break;
-    case MULTIFIRE:
-      dischargeCoil();
-      remainingCount--;
-      updateTimer = true;
-      break;
-  }
-  
-  if (updateTimer == true) 
-  {
-    stopTimer1();
-    updateTimer = false;
-    timerCount++;
-    
-    if (debug && loopsSinceSerialWrite >= serialOutLoops)
-    {
-      Serial.print("Timer Reached - ");
-      Serial.print(timerCount);
-      Serial.print(", ");
-    }
-    
-    ignitionMode = nextMode(ignitionMode);
-    
-    //Set the delay period (Head of Mode)
-    switch(ignitionMode)
-    {
-      case OFF:
-        dischargeCoil();
-        break;
-      case DWELL:
-        //Charging Coil
-        chargeCoil();
-        startTimer1(dwell);
-        break;
-      case MF_WAIT:
-        //Waiting (MultiFire)
-        startTimer1(multiDelay);
-        break;
-      case MF_DWELL:
-        //Charging Coil
-        chargeCoil();
-        startTimer1(dwell);
-        break;
-      case WAIT:
-        //Waiting (Frequency)
-        startTimer1(period);
-        break;
-    }
-  }
+  completeIgnitionCycle();
   
   if (debug && loopsSinceSerialWrite >= serialOutLoops)
   {
@@ -194,6 +136,80 @@ void loop()
   }
 
   loopsSinceSerialWrite++;
+}
+
+// -------------------------
+//      Ignition Cycle
+// -------------------------
+bool completeIgnitionCycle()
+{
+  for (;;)
+  {
+    //Run a Complete Ignition Cycle
+    switch(ignitionMode)
+    {
+      case OFF:
+        dischargeCoil();
+        break;
+      case DWELL:
+        //Charging Coil
+        chargeCoil();
+        delayAtLeast(dwell);
+        break;
+      case FIRE:
+        dischargeCoil();
+        if (multiFire) remainingCount = multiCount - 1;
+        break;
+      case MF_WAIT:
+        //Waiting (MultiFire)
+        delayAtLeast(multiDelay);
+        break;
+      case MF_DWELL:
+        //Charging Coil
+        chargeCoil();
+        delayAtLeast(dwell);
+        break;
+      case MULTIFIRE:
+        dischargeCoil();
+        remainingCount--;
+        break;
+      case WAIT:
+        //Waiting (Frequency)
+        delayAtLeast(period);
+        break;
+    }
+    
+    ignitionMode = nextMode(ignitionMode);
+
+    if (ignitionMode == WAIT) return true;
+    else if (!active || ignitionMode == OFF) return false;
+  }
+}
+
+byte nextMode(byte mode)
+{
+  switch(mode) {
+    case OFF:
+      return OFF;
+    case DWELL:
+      return FIRE;
+    case FIRE:
+      if(multiFire && remainingCount > 0)
+        return MF_WAIT;
+      else
+        return WAIT;
+    case MF_WAIT:
+      return MF_DWELL;
+    case MF_DWELL:
+      return MULTIFIRE;
+    case MULTIFIRE:
+      if (remainingCount > 0)
+        return MF_WAIT;
+      else
+        return WAIT;
+    case WAIT:
+      return DWELL;
+  }
 }
 
 // -------------------------
@@ -283,14 +299,12 @@ void enableCoil()
 {
   //Enable Coil Firing
   ignitionMode = DWELL;
-  updateTimer = true;
 }
 
 void disableCoil()
 {
   //Disable Coil Firing
   ignitionMode = OFF;
-  updateTimer = true;
 }
 
 void chargeCoil()
@@ -315,38 +329,12 @@ void dischargeCoil()
   digitalWrite(INTERNAL_LED_PIN, LOW);
 }
 
-byte nextMode(byte mode)
-{
-  switch(mode) {
-    case OFF:
-      return OFF;
-    case DWELL:
-      return FIRE;
-    case FIRE:
-      if(multiFire && remainingCount > 0)
-        return MF_WAIT;
-      else
-        return WAIT;
-    case MF_WAIT:
-      return MF_DWELL;
-    case MF_DWELL:
-      return MULTIFIRE;
-    case MULTIFIRE:
-      if (remainingCount > 0)
-        return MF_WAIT;
-      else
-        return WAIT;
-    case WAIT:
-      return DWELL;
-  }
-}
-
 void fireMultiple()
 {
   fireCoil();
   for(int i = 1; i < multiCount; i++)
   {
-    delayMicroseconds(multiDelay);
+    delayAtLeast(multiDelay);
     fireCoil();
   }
 }
@@ -354,7 +342,7 @@ void fireMultiple()
 void fireCoil()
 {
   chargeCoil();
-  delayMicroseconds(dwell);
+  delayAtLeast(dwell);
   dischargeCoil();
 }
 
@@ -374,105 +362,24 @@ void ISR_ACTIVE()
   active = isActive();
 }
 
-void ISR_IGNITION()
-{
-  //Interrupt has fired
-  updateTimer = true;
-}
-
-//Attach ISR to Timer1 Overflow
-ISR(TIMER1_OVF_vect)
-{
-  ISR_IGNITION();
-}
-
 // -------------------------
 // Generic Utility Functions
 // -------------------------
-void delayFixed(long milliseconds)
+void delayFixed(unsigned long milliseconds)
 {
-  if (milliseconds <= 0)
+  if (milliseconds = 0)
     return;
   else if (milliseconds < 16)
-    delayMicroseconds(milliseconds * 1000);
+    delayAtLeast(milliseconds * 1000);
   else
     delay(milliseconds);
 }
 
-void initializeTimer1()
+void delayAtLeast(unsigned long microseconds)
 {
-  noInterrupts();
-  //Set Mode: Phase and Frequency correct PWM (stops the timer)
-  TCCR1A = 0;                 //Set Mode (bit 1A)
-  TCCR1B = bit(WGM13);        //Set Mode (bit 1B)
-  TIMSK1 = bit(TOIE1);        //Enable Overflow ISR
-  interrupts();
-}
-
-void startTimer1(unsigned long microseconds)
-{
-  char clockSelectBits;
-  short pwmPeriod;
-  
-  //Calculate clock select bits
-  const unsigned long cycles = (F_CPU / 2000000) * microseconds;
-  if (cycles < TIMER1_RESOLUTION) 
-  {
-    //No Prescaling
-    clockSelectBits = bit(CS10);
-    pwmPeriod = cycles;
-  } 
-  else if (cycles < TIMER1_RESOLUTION * 8) 
-  {
-    //Prescale by /8
-    clockSelectBits = bit(CS11);
-    pwmPeriod = cycles / 8;
-  }
-  else if (cycles < TIMER1_RESOLUTION * 64) 
-  {
-    //Prescale by /64
-    clockSelectBits = bit(CS11) | bit(CS10);
-    pwmPeriod = cycles / 64;
-  } 
-  else if (cycles < TIMER1_RESOLUTION * 256) 
-  {
-    //Prescale by /256
-    clockSelectBits = bit(CS12);
-    pwmPeriod = cycles / 256;
-  }
-  else if (cycles < TIMER1_RESOLUTION * 1024) 
-  {
-    //Prescale by /1024
-    clockSelectBits = bit(CS12) | bit(CS10);
-    pwmPeriod = cycles / 1024;
-  } 
-  else
-  {
-    //Out of bounds, use maximum prescaler
-    clockSelectBits = bit(CS12) | bit(CS10);
-    pwmPeriod = TIMER1_RESOLUTION - 1;
-  }
-
-  noInterrupts();
-  TCNT1 = 1;                             //Resets the counter
-  ICR1 = pwmPeriod;                      //Sets the Period
-  //Set Mode: Phase and Frequency correct PWM (Starts the timer)
-  TCCR1A = 0;                            //Set Mode (bit 1A)
-  TCCR1B = bit(WGM13) | clockSelectBits; //Set Mode (bit 1B)
-  //unsigned int tcnt1;
-  //do {  // Nothing -- wait until timer moved on from zero - otherwise get a phantom interrupt
-  //  tcnt1 = TCNT1;
-  //} while (tcnt1==0);
-  interrupts();
-}
-
-void stopTimer1()
-{
-  noInterrupts();
-  //Set Mode: Phase and Frequency correct PWM (stops the timer)
-  TCCR1A = 0;                 //Set Mode (bit 1A)
-  TCCR1B = bit(WGM13);        //Set Mode (bit 1B)
-  interrupts();
+  unsigned long target = micros() + microseconds;
+  while (micros() < target)
+    ;
 }
 
 long readInternalTemp() 
