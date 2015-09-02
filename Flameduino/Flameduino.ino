@@ -8,8 +8,6 @@
 Flameduino Controls an ignition coil with a set dwell (compile time)
 and variable spark frequency, specifically for purposes of flamethrowing.
 */
-//#include <TimerOne.h>
-#define TIMER1_RESOLUTION 65536UL  // Timer1 is 16 bit
 
 // -------------------------
 //     Pin Definitions
