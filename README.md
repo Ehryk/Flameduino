@@ -34,4 +34,4 @@ Eric Menze
  - [Portfolio](http://ericmenze.com)
  - [Github](https://github.com/Ehryk)
  - [Twitter](https://twitter.com/Ehryk42)
- - [Source Code](https://github.com/Ehryk/HashCompute)
+ - [Source Code](https://github.com/Ehryk/Flameduino)
