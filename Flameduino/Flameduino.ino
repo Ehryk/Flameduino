@@ -15,7 +15,9 @@ and variable spark frequency, specifically for purposes of flamethrowing.
 #define ACTIVATION_PIN 2
 #define TACH_PIN 3
 #define IGNITION_PIN 4
-#define EXTERNAL_LED_PIN 4
+#define EXTERNAL_LED_PIN 5
+#define ACTIVATION_STATIC_PIN 7
+#define IGNITION_STATIC_PIN 8
 #define INTERNAL_LED_PIN 13
 #define FREQUENCY_PIN A0
 
@@ -74,14 +76,20 @@ int timerCount = 0;
 void setup() 
 {
   pinMode(ACTIVATION_PIN, INPUT);
+  pinMode(ACTIVATION_STATIC_PIN, OUTPUT);
   pinMode(TACH_PIN, INPUT);
   pinMode(IGNITION_PIN, OUTPUT);
+  pinMode(IGNITION_STATIC_PIN, OUTPUT);
   pinMode(FREQUENCY_PIN, INPUT);
   pinMode(INTERNAL_LED_PIN, OUTPUT);
   pinMode(EXTERNAL_LED_PIN, OUTPUT);
   
   //Use built in pull-up resistor
   digitalWrite(ACTIVATION_PIN, HIGH);
+
+  //Set Static Pins
+  digitalWrite(ACTIVATION_STATIC_PIN, activeState);
+  digitalWrite(IGNITION_STATIC_PIN, LOW);
   
   active = isActive();
   dischargeCoil();
