@@ -2,12 +2,15 @@
 ==============
 = Flameduino =
 ==============
-     v1.2
+     v1.3
   Eric Menze
 
 Flameduino Controls an ignition coil with a set dwell (compile time)
 and variable spark frequency, specifically for purposes of flamethrowing.
 */
+
+#include <Wire.h>
+#include "MCP4726.h"
 
 // -------------------------
 //     Pin Definitions
@@ -21,6 +24,9 @@ and variable spark frequency, specifically for purposes of flamethrowing.
 #define COIL_INTERRUPT_PIN 11
 #define INTERNAL_LED_PIN 13
 #define FREQUENCY_PIN A0
+#define IAT_IN_PIN A1
+#define O2_IN_PIN A2
+#define MAP_IN_PIN A3
 
 // -------------------------
 //      Ignition Modes
@@ -65,11 +71,19 @@ unsigned long tachDuration0 = 0;
 unsigned long tachDuration1 = 0;
 unsigned long tachDuration2 = 0;
 unsigned int rpm = 0;
+unsigned int pressure = 0;
+unsigned int maf = 0;
+unsigned int iat = 0;
 byte remainingCount = 0;
 int loopsSinceSerialWrite = 0;
 long period = 0;
 
 int timerCount = 0;
+
+// -------
+//   DAC
+// -------
+MCP4726 dac;
 
 // -------------------------
 //      Initialization
@@ -99,7 +113,9 @@ void setup()
 
   attachInterrupt(TACH_PIN - 2, ISR_TACH, RISING);
   attachInterrupt(ACTIVATION_PIN - 2, ISR_ACTIVE, CHANGE);
-  
+
+  dac.begin(0x60, false);
+
   if (debug)
   {
     Serial.begin(9600); 
@@ -115,6 +131,9 @@ void loop()
 {
   period = getPeriod();
   rpm = getRPM();
+  pressure = getMAP();
+  iat = getIAT();
+  maf = setMAF(pressure, iat, rpm);
 
   if (debug && loopsSinceSerialWrite >= serialOutLoops)
   {
@@ -232,7 +251,6 @@ bool isActive()
 long getPeriod()
 {
   int frequency = analogRead(FREQUENCY_PIN);
-  
   float percentage = frequency / 1023.0;
   
   if (debug && loopsSinceSerialWrite >= serialOutLoops)
@@ -297,6 +315,47 @@ unsigned int getRPM()
   
   //Convert to RPM
   return 60.0 * 1000000 / average;
+}
+
+unsigned int getMAP()
+{
+  int pressure = analogRead(MAP_IN_PIN);
+  float percentage = pressure / 1023.0;
+  
+  if (debug && loopsSinceSerialWrite >= serialOutLoops)
+  {
+    Serial.print("MAP: ");
+    Serial.print(pressure);
+    Serial.print("(");
+    Serial.print(percentage * 100);
+    Serial.print("%), ");
+  }
+  
+  return pressure;
+}
+
+unsigned int getIAT()
+{
+  int temp = analogRead(IAT_IN_PIN);
+  float percentage = temp / 1023.0;
+  
+  if (debug && loopsSinceSerialWrite >= serialOutLoops)
+  {
+    Serial.print("IAT: ");
+    Serial.print(temp);
+    Serial.print("(");
+    Serial.print(percentage * 100);
+    Serial.print("%), ");
+  }
+  
+  return temp;
+}
+
+int setMAF(int pressure, int iat, int rpm)
+{
+  int maf = 1.8 * 
+  dac.setOutput(maf);
+  return maf;
 }
 
 bool isStale()

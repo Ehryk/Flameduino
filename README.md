@@ -1,7 +1,7 @@
-Flameduino v1.2
+Flameduino v1.3
 ===============
 
-The flameduino is set to drive an ignition coil or coil-pack (coil on plug) for achieving sparks at defined intervals and a set dwell. This can then be used to ignite things (like grills) or, if put in a vehicle's exhaust, a flamethrower. It is designed to incorporate a potentiometer for variable spark frequency (delay period between firing events).
+The Flameduino is set to drive an ignition coil or coil-pack (coil on plug) for achieving sparks at defined intervals and a set dwell. This can then be used to ignite things (like grills) or, if put in a vehicle's exhaust, a flamethrower. It is designed to incorporate a potentiometer for variable spark frequency (delay period between firing events).
 
 Features
 ---
@@ -12,9 +12,11 @@ The current feature set includes:
  - Invertable Trigger output (HIGH or LOW)
  - MultiFire (multiple sparks per event, configurable `firingDwell`)
  - Extremely accurate tachometer
+ - MAF Emulation
 
 Release History
 ---
+ - v1.3 2015.11.10 Starting MAF emulation
  - v1.2 2015.09.02 Added tachometer and activation via external interrupts
  - v1.1 2015.08.27 Added multiFire feature
  - v1.0 2015.08.26 Initial Release
